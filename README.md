@@ -33,7 +33,13 @@ This MVP uses curated CSV datasets stored in `data/` for a deterministic demo. V
 pip install -r requirements.txt
 ```
 
-3. Copy `.env.example` to `.env` and add your OpenAI API key if you want AI insights.
+3. Create a `.env` file and add your OpenAI API key if you want AI insights:
+
+```env
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-4.1-mini
+```
+
 4. Start the app:
 
 ```bash
@@ -68,6 +74,43 @@ docker run --rm -p 8501:8501 tirelens
 ```
 
 The application will be available at `http://localhost:8501`.
+
+## Docker Compose
+
+This repo also includes `compose.yaml` for a one-command startup.
+
+Start the app:
+
+```bash
+docker compose up --build
+```
+
+Run in the background:
+
+```bash
+docker compose up --build -d
+```
+
+Stop it:
+
+```bash
+docker compose down
+```
+
+To enable AI insights with Docker Compose, create a `.env` file in the project root:
+
+```env
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-4.1-mini
+```
+
+Then start the app with:
+
+```bash
+docker compose up --build
+```
+
+The app will be available at `http://localhost:8501` on that machine. Because Streamlit is configured to listen on `0.0.0.0`, you can also open it from another device on the same network at `http://<computer-ip>:8501` if that computer's firewall allows port `8501`.
 
 ## How LLM Is Used
 

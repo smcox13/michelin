@@ -293,7 +293,7 @@ def render_brand_tile(brand: str, is_selected: bool) -> str:
 
 
 def render_brand_tiles(available_brands: list[str]) -> list[str]:
-    st.markdown("**Select brands**")
+    st.markdown("**Step 1: Select Brands for Comparison**")
     render_brand_tile_styles()
     tile_columns = st.columns(min(len(available_brands), 4))
     selected_brands: list[str] = []
@@ -336,7 +336,13 @@ def main() -> None:
     available_brands = sorted(financials["brand"].unique().tolist())
 
     selected_brands = render_brand_tiles(available_brands)
-    selected_domain = st.selectbox("Select comparison domain", options=DOMAINS)
+
+    st.divider()
+
+
+    st.markdown("**Step 2: Choose What to Compare**")
+
+    selected_domain = st.selectbox("Select the comparison domain:", options=DOMAINS)
 
     if len(selected_brands) < 2:
         st.warning("Select at least two brands to generate a meaningful comparison.")
@@ -369,12 +375,15 @@ def main() -> None:
             y="Value",
             color="Metric",
             barmode="group",
-            title=f"{selected_domain} metrics by brand",
+            #title=f"{selected_domain} metrics by brand",
         )
         figure.update_layout(legend_title_text="")
         st.plotly_chart(figure, use_container_width=True)
 
     st.divider()
+
+    st.markdown("**Step 3: Generate AI Insight for Your Selections**")
+
 
     cache_key = f"analysis::{selected_domain}::{','.join(sorted(selected_brands))}"
     if st.button("Generate AI Insight", type="primary"):
