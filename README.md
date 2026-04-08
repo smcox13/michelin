@@ -2,12 +2,15 @@
 
 TireLens is a lightweight Streamlit application for comparing four major tire brands across financial, sustainability, and product portfolio dimensions. It pairs curated public-style datasets with explainable analytics and an LLM-powered insight panel that returns structured analysis on demand.
 
+TireLens now also supports optional MCP-backed public data enrichment. The app keeps the curated CSV datasets as the stable baseline, and when compatible MCP servers are configured it augments the experience with live finance and news context.
+
 ## What The Application Does
 
 - Compares Michelin, Goodyear, Continental, and Bridgestone.
 - Shows a domain-specific comparison table and chart for Financials, Sustainability, or Products.
 - Calculates transparent ranking metrics, including revenue growth and a composite score.
 - Generates structured AI analysis using OpenAI via LangChain.
+- Optionally enriches AI insight and UI context with public MCP finance/news tooling.
 
 ## Architecture Overview
 
@@ -15,6 +18,7 @@ TireLens is a lightweight Streamlit application for comparing four major tire br
 - **Analytics:** Pure Python helpers in `services/analytics.py`
 - **Data Layer:** Curated CSV datasets loaded by `services/data_loader.py`
 - **LLM Integration:** LangChain prompt and structured response model in `chains/brand_analysis_chain.py` and `services/llm_service.py`
+- **MCP Enrichment:** Optional connector layer and orchestration in `services/mcp_service.py`
 
 ## Data Sources
 
@@ -40,7 +44,25 @@ OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-mini
 ```
 
-4. Start the app:
+4. Optional: configure MCP connectors if you want live finance/news enrichment:
+
+```env
+MCP_ENABLED=true
+MCP_REQUEST_TIMEOUT_SECONDS=8
+MCP_CACHE_TTL_SECONDS=300
+
+FINANCE_MCP_TRANSPORT=streamable-http
+FINANCE_MCP_URL=http://localhost:9001/mcp
+FINANCE_MCP_TOOL=get_brand_finance
+
+NEWS_MCP_TRANSPORT=streamable-http
+NEWS_MCP_URL=http://localhost:9002/mcp
+NEWS_MCP_TOOL=get_brand_news
+```
+
+You can also use `stdio` transport instead of HTTP by setting `..._TRANSPORT=stdio`, `..._COMMAND`, and `..._ARGS`.
+
+5. Start the app:
 
 ```bash
 streamlit run app.py
@@ -50,8 +72,63 @@ streamlit run app.py
 
 - `OPENAI_API_KEY`: Required to generate AI insights.
 - `OPENAI_MODEL`: Optional. Defaults to `gpt-4.1-mini`.
+- `MCP_ENABLED`: Enables optional live MCP enrichment.
+- `MCP_REQUEST_TIMEOUT_SECONDS`: Timeout applied to each configured connector request.
+- `MCP_CACHE_TTL_SECONDS`: In-memory cache TTL for live MCP context.
+- `FINANCE_MCP_*`: Transport, target, headers, and tool configuration for the finance connector.
+- `NEWS_MCP_*`: Transport, target, headers, and tool configuration for the news connector.
 
 If `OPENAI_API_KEY` is not set, the app still works and displays a graceful fallback message in the AI panel.
+If MCP is disabled, unconfigured, or unavailable, the comparison experience stays fully usable and falls back to curated mode.
+
+## MCP Enrichment Behavior
+
+- Core comparison tables and charts remain driven by the curated CSV datasets in v1.
+- When live MCP context is available, TireLens switches the source badge to `Hybrid`.
+- The app shows a source-status strip plus a `Live MCP Highlights` section with provider-backed finance or news context.
+- MCP failures are non-blocking. Warnings appear in the UI, but the comparison still renders.
+- AI insight generation keeps using the curated metrics payload and appends live MCP context when present.
+
+## MCP Connector Notes
+
+TireLens ships with two example connector adapters:
+
+- Finance MCP connector: expects a configured tool that can return structured finance context for a brand.
+- News MCP connector: expects a configured tool that can return recent brand-news summaries or headlines.
+
+These adapters are intentionally pluggable. TireLens does not hardcode any single public MCP server. Instead, you configure the provider URL or command and the tool name through environment variables.
+
+Example structured payloads the adapters can consume:
+
+```json
+{
+  "brand": "Michelin",
+  "summary": "Premium demand remains steady.",
+  "source": "Finance MCP",
+  "as_of": "2026-04-08T12:00:00Z",
+  "metrics": {
+    "revenue_usd_bn": 31.2,
+    "operating_margin_pct": 12.4,
+    "market_cap_usd_bn": 29.1
+  }
+}
+```
+
+```json
+{
+  "brand": "Michelin",
+  "source": "News MCP",
+  "themes": ["EV demand", "premium pricing"],
+  "items": [
+    {
+      "headline": "Michelin expands EV lineup",
+      "summary": "The brand announced additional EV-focused tire capacity.",
+      "published_at": "2026-04-08T11:00:00Z",
+      "source": "Example News Feed"
+    }
+  ]
+}
+```
 
 ## Docker
 
@@ -102,6 +179,11 @@ To enable AI insights with Docker Compose, create a `.env` file in the project r
 ```env
 OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-mini
+MCP_ENABLED=true
+FINANCE_MCP_URL=http://host.docker.internal:9001/mcp
+FINANCE_MCP_TOOL=get_brand_finance
+NEWS_MCP_URL=http://host.docker.internal:9002/mcp
+NEWS_MCP_TOOL=get_brand_news
 ```
 
 Then start the app with:
@@ -112,11 +194,13 @@ docker compose up --build
 
 The app will be available at `http://localhost:8501` on that machine. Because Streamlit is configured to listen on `0.0.0.0`, you can also open it from another device on the same network at `http://<computer-ip>:8501` if that computer's firewall allows port `8501`.
 
+When using Docker, keep MCP endpoints reachable from inside the container. For local HTTP MCP servers on macOS, `host.docker.internal` is often the simplest option.
+
 ## How LLM Is Used
 
 - The user selects brands and a comparison domain.
 - TireLens prepares a structured metrics payload from the visible data.
-- The LLM receives only the selected-domain metrics plus limited qualitative context.
+- The LLM receives the selected-domain curated metrics plus optional live MCP context.
 - LangChain validates the response into a structured schema before the UI renders it.
 
 ## Tests
@@ -130,6 +214,7 @@ pytest
 ## Limitations
 
 - Uses curated datasets instead of live financial or ESG APIs.
+- Live MCP enrichment depends on compatible external MCP tooling and environment configuration.
 - Excludes real-time news sentiment in the MVP.
 - AI insights are only as strong as the structured inputs provided.
 - The comparison universe is limited to four brands in v1.

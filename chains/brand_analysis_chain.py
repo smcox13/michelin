@@ -37,9 +37,13 @@ def create_brand_analysis_chain(llm: ChatOpenAI | None = None):
                 "system",
                 (
                     "You are a financial and sustainability analyst helping users compare "
-                    "global tire brands. Use only the structured data provided. Pick one "
-                    "clear leader for the selected domain, explain tradeoffs, call out "
-                    "real risks, and keep the summary concise and evidence-based."
+                    "global tire brands. Use only the structured data provided. The "
+                    "curated metrics payload is the stable baseline. If live MCP context "
+                    "is present, use it to augment the analysis, prefer fresher evidence "
+                    "when it is clearly relevant, and be explicit when the conclusion is "
+                    "based on mixed curated and live inputs. Pick one clear leader for "
+                    "the selected domain, explain tradeoffs, call out real risks, and "
+                    "keep the summary concise and evidence-based."
                 ),
             ),
             (
@@ -48,7 +52,8 @@ def create_brand_analysis_chain(llm: ChatOpenAI | None = None):
                     "Analyze the selected tire brands.\n"
                     "Domain: {domain}\n"
                     "Brands: {brands}\n"
-                    "Metrics JSON:\n{metrics_json}\n\n"
+                    "Curated Metrics JSON:\n{metrics_json}\n\n"
+                    "Live MCP Context JSON:\n{live_context_json}\n\n"
                     "Return structured output only."
                 ),
             ),

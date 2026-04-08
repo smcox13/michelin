@@ -19,6 +19,8 @@ from services.data_loader import (
     load_products,
     load_sustainability,
 )
+from services.mcp_models import LiveContextBundle, SourceAttribution
+from services.mcp_service import get_live_context
 from services.llm_service import generate_brand_analysis
 
 
@@ -155,6 +157,95 @@ def render_analysis_card(analysis: dict[str, Any]) -> None:
     )
     render_analysis_list_field("Risk Factors", analysis["risk_factors"])
     render_analysis_text_field("Executive Summary", analysis["summary"])
+
+
+def summarize_source_status(attribution: SourceAttribution) -> dict[str, str | list[str]]:
+    mode_label = attribution.mode.title()
+    provider_text = ", ".join(attribution.providers) if attribution.providers else "Curated CSV datasets"
+    freshness_text = attribution.freshness_timestamp or "Not available"
+    return {
+        "mode_label": mode_label,
+        "provider_text": provider_text,
+        "freshness_text": freshness_text,
+        "warnings": list(attribution.warnings),
+    }
+
+
+def build_source_status_markup(attribution: SourceAttribution) -> str:
+    summary = summarize_source_status(attribution)
+    badge_background = {
+        "Curated": "#EEF2FF",
+        "Hybrid": "#ECFDF3",
+        "Live": "#FEF3C7",
+    }.get(str(summary["mode_label"]), "#EEF2FF")
+    badge_color = {
+        "Curated": "#3730A3",
+        "Hybrid": "#166534",
+        "Live": "#92400E",
+    }.get(str(summary["mode_label"]), "#3730A3")
+
+    return f"""
+    <div style="
+        border: 1px solid #E5E7EB;
+        border-radius: 18px;
+        padding: 14px 18px;
+        background: linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        align-items: center;
+        margin-bottom: 1rem;
+    ">
+      <div style="
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 12px;
+          border-radius: 999px;
+          background: {badge_background};
+          color: {badge_color};
+          font-weight: 700;
+          font-size: 13px;
+      ">
+        Source Mode: {escape(str(summary["mode_label"]))}
+      </div>
+      <div style="min-width: 180px;">
+        <div style="font-size: 12px; color: #6B7280; font-weight: 600;">Providers</div>
+        <div style="font-size: 14px; color: #111827;">{escape(str(summary["provider_text"]))}</div>
+      </div>
+      <div style="min-width: 180px;">
+        <div style="font-size: 12px; color: #6B7280; font-weight: 600;">Freshness</div>
+        <div style="font-size: 14px; color: #111827;">{escape(str(summary["freshness_text"]))}</div>
+      </div>
+    </div>
+    """
+
+
+def build_live_highlight_items(live_context: LiveContextBundle) -> list[str]:
+    return list(live_context.highlights)
+
+
+def render_source_status_strip(attribution: SourceAttribution) -> None:
+    st.markdown(build_source_status_markup(attribution), unsafe_allow_html=True)
+
+
+def render_live_context_section(live_context: LiveContextBundle) -> None:
+    highlight_items = build_live_highlight_items(live_context)
+    if not highlight_items and not live_context.attribution.warnings:
+        return
+
+    st.subheader("Live MCP Highlights")
+    st.caption(
+        "Public MCP tooling augments the demo datasets when available. "
+        "Core comparison tables remain deterministic in this version."
+    )
+
+    if highlight_items:
+        for item in highlight_items:
+            st.markdown(f"- {escape(item)}")
+
+    for warning in live_context.attribution.warnings:
+        st.info(warning)
 
 
 
@@ -349,6 +440,17 @@ def main() -> None:
         return
 
     try:
+        live_context = get_live_context(selected_brands, selected_domain)
+    except ValueError as exc:
+        live_context = LiveContextBundle(
+            domain=selected_domain,
+            attribution=SourceAttribution(
+                mode="curated",
+                warnings=(f"MCP configuration error: {exc}",),
+            ),
+        )
+
+    try:
         filtered_financials = filter_by_brands(financials, selected_brands)
         filtered_sustainability = filter_by_brands(sustainability, selected_brands)
         filtered_products = filter_by_brands(products, selected_brands)
@@ -361,6 +463,8 @@ def main() -> None:
     except (DataValidationError, ValueError) as exc:
         st.error(f"Unable to build comparison: {exc}")
         return
+
+    render_source_status_strip(live_context.attribution)
 
     left_col, right_col = st.columns((1.15, 1))
     with left_col:
@@ -380,6 +484,8 @@ def main() -> None:
         figure.update_layout(legend_title_text="")
         st.plotly_chart(figure, use_container_width=True)
 
+    render_live_context_section(live_context)
+
     st.divider()
 
     st.markdown("**Step 3: Generate AI Insight for Your Selections**")
@@ -392,6 +498,7 @@ def main() -> None:
                 selected_brands,
                 selected_domain,
                 comparison["llm_payload"],
+                live_context=live_context,
             )
             st.session_state[cache_key] = analysis.model_dump()
 
