@@ -26,6 +26,13 @@ from services.mcp_models import (
     SourceAttribution,
 )
 
+BRAND_TICKERS = {
+    "Michelin": "MGDDY",
+    "Goodyear": "GT",
+    "Continental": "CTTAY",
+    "Bridgestone": "BRDCY",
+}
+
 
 def _parse_bool(value: str | None, default: bool) -> bool:
     if value is None:
@@ -140,6 +147,10 @@ def _coerce_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _brand_symbol(brand: str) -> str:
+    return BRAND_TICKERS.get(brand, brand)
 
 
 def _extract_text_content(result: Any) -> str:
@@ -274,6 +285,9 @@ class MCPConnector(ABC):
                 await session.initialize()
                 return await session.call_tool(self.config.tool_name, arguments=arguments)
 
+    def _build_arguments(self, brand: str, domain: str) -> dict[str, Any]:
+        return {"brand": brand, "domain": domain}
+
     @abstractmethod
     async def _fetch_context_async(
         self,
@@ -296,22 +310,51 @@ class FinanceMCPConnector(MCPConnector):
         fetched_at: str | None = None
 
         for brand in brands:
-            raw_result = await self._call_tool({"brand": brand, "domain": domain})
+            raw_result = await self._call_tool(self._build_arguments(brand, domain))
             payload = _extract_structured_result(raw_result)
             if not isinstance(payload, dict):
                 warnings.append(f"{self.provider_name} returned an unexpected finance payload.")
                 continue
 
-            metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else payload
+            metrics = payload
+            if isinstance(payload.get("metrics"), dict):
+                metrics = payload["metrics"]
+            elif isinstance(payload.get("snapshot"), dict):
+                metrics = payload["snapshot"]
+            elif isinstance(payload.get("company_facts"), dict):
+                metrics = payload["company_facts"]
+
             normalized_brand = str(payload.get("brand") or metrics.get("brand") or brand)
+            market_cap_usd_bn = _coerce_float(
+                metrics.get("market_cap_usd_bn") or metrics.get("market_cap")
+            )
+            if market_cap_usd_bn is not None and market_cap_usd_bn > 1000:
+                market_cap_usd_bn = market_cap_usd_bn / 1_000_000_000
+
+            operating_margin_pct = _coerce_float(
+                metrics.get("operating_margin_pct") or metrics.get("operating_margin")
+            )
+            if operating_margin_pct is not None and 0 <= operating_margin_pct <= 1:
+                operating_margin_pct = operating_margin_pct * 100
+
+            summary = str(payload.get("summary") or metrics.get("summary") or "").strip()
+            if not summary:
+                finance_parts = []
+                if market_cap_usd_bn is not None:
+                    finance_parts.append(f"market cap {market_cap_usd_bn:.2f}B USD")
+                if operating_margin_pct is not None:
+                    finance_parts.append(f"operating margin {operating_margin_pct:.1f}%")
+                if finance_parts:
+                    summary = f"Latest live finance snapshot shows {', '.join(finance_parts)}."
+
             finance_context = LiveFinanceContext(
                 brand=normalized_brand,
-                summary=str(payload.get("summary") or metrics.get("summary") or "").strip(),
+                summary=summary,
                 source=str(payload.get("source") or self.provider_name),
                 as_of=_normalize_timestamp(payload.get("as_of") or metrics.get("as_of")),
                 revenue_usd_bn=_coerce_float(metrics.get("revenue_usd_bn")),
-                operating_margin_pct=_coerce_float(metrics.get("operating_margin_pct")),
-                market_cap_usd_bn=_coerce_float(metrics.get("market_cap_usd_bn")),
+                operating_margin_pct=operating_margin_pct,
+                market_cap_usd_bn=market_cap_usd_bn,
             )
             if not finance_context.summary and all(
                 value is None
@@ -336,6 +379,12 @@ class FinanceMCPConnector(MCPConnector):
             warnings=tuple(warnings),
         )
 
+    def _build_arguments(self, brand: str, domain: str) -> dict[str, Any]:
+        tool_name = self.config.tool_name
+        if tool_name in {"getFinancialMetricsSnapshot", "getCompanyFacts"}:
+            return {"ticker": _brand_symbol(brand)}
+        return super()._build_arguments(brand, domain)
+
 
 class NewsMCPConnector(MCPConnector):
     """Example news adapter that calls a recent-news MCP tool."""
@@ -350,13 +399,15 @@ class NewsMCPConnector(MCPConnector):
         fetched_at: str | None = None
 
         for brand in brands:
-            raw_result = await self._call_tool({"brand": brand, "domain": domain})
+            raw_result = await self._call_tool(self._build_arguments(brand, domain))
             payload = _extract_structured_result(raw_result)
             if not isinstance(payload, dict):
                 warnings.append(f"{self.provider_name} returned an unexpected news payload.")
                 continue
 
             items = payload.get("items", [])
+            if not isinstance(items, list) and isinstance(payload.get("news"), list):
+                items = payload.get("news", [])
             if not isinstance(items, list):
                 warnings.append(f"{self.provider_name} returned malformed news items for {brand}.")
                 continue
@@ -365,20 +416,26 @@ class NewsMCPConnector(MCPConnector):
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                headline = str(item.get("headline") or "").strip()
+                headline = str(item.get("headline") or item.get("title") or "").strip()
+                sentiment = str(item.get("sentiment") or "").strip()
+                source = str(item.get("source") or payload.get("source") or self.provider_name)
                 summary = str(item.get("summary") or headline).strip()
+                if not item.get("summary") and sentiment:
+                    summary = f"{summary} Sentiment: {sentiment}."
                 if not headline and not summary:
                     continue
                 headlines.append(
                     NewsHeadline(
                         headline=headline or summary,
                         summary=summary or headline,
-                        source=str(item.get("source") or payload.get("source") or self.provider_name),
-                        published_at=_normalize_timestamp(item.get("published_at")),
+                        source=source,
+                        published_at=_normalize_timestamp(item.get("published_at") or item.get("date")),
                     )
                 )
 
             themes_raw = payload.get("themes", [])
+            if not themes_raw:
+                themes_raw = [item.get("sentiment") for item in items if isinstance(item, dict)]
             themes = tuple(str(theme).strip() for theme in themes_raw if str(theme).strip())
             if not headlines and not themes:
                 warnings.append(f"{self.provider_name} returned no usable news details for {brand}.")
@@ -403,6 +460,11 @@ class NewsMCPConnector(MCPConnector):
             fetched_at=fetched_at,
             warnings=tuple(warnings),
         )
+
+    def _build_arguments(self, brand: str, domain: str) -> dict[str, Any]:
+        if self.config.tool_name == "getNews":
+            return {"ticker": _brand_symbol(brand), "limit": 5}
+        return super()._build_arguments(brand, domain)
 
 
 _CACHE: dict[tuple[object, ...], tuple[float, LiveContextBundle]] = {}

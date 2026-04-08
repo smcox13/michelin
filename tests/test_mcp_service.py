@@ -10,7 +10,15 @@ from services.mcp_models import (
     NewsHeadline,
     SourceAttribution,
 )
-from services.mcp_service import _CACHE, augment_llm_payload, get_live_context, load_mcp_settings
+from services.mcp_service import (
+    _CACHE,
+    BRAND_TICKERS,
+    FinanceMCPConnector,
+    NewsMCPConnector,
+    augment_llm_payload,
+    get_live_context,
+    load_mcp_settings,
+)
 
 
 class StubConnector:
@@ -206,3 +214,38 @@ def test_augment_llm_payload_includes_live_context_details():
     assert payload["live_context"]["providers"] == ["Finance MCP", "News MCP"]
     assert payload["live_context"]["finance_updates"][0]["brand"] == "Michelin"
     assert payload["live_context"]["news_updates"][0]["themes"] == ["EV demand"]
+
+
+def test_finance_connector_maps_known_brand_to_ticker_for_financial_datasets():
+    connector = FinanceMCPConnector(
+        MCPServerConfig(
+            name="Finance MCP",
+            enabled=True,
+            transport="streamable-http",
+            tool_name="getFinancialMetricsSnapshot",
+            request_timeout_seconds=5.0,
+            url="https://mcp.financialdatasets.ai/api",
+        )
+    )
+
+    assert connector._build_arguments("Michelin", "Financials") == {
+        "ticker": BRAND_TICKERS["Michelin"]
+    }
+
+
+def test_news_connector_maps_known_brand_to_ticker_for_financial_datasets():
+    connector = NewsMCPConnector(
+        MCPServerConfig(
+            name="News MCP",
+            enabled=True,
+            transport="streamable-http",
+            tool_name="getNews",
+            request_timeout_seconds=5.0,
+            url="https://mcp.financialdatasets.ai/api",
+        )
+    )
+
+    assert connector._build_arguments("Bridgestone", "Financials") == {
+        "ticker": BRAND_TICKERS["Bridgestone"],
+        "limit": 5,
+    }
