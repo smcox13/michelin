@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app import build_evidence_list_html, format_analysis_paragraphs
+from app import build_evidence_list_html, format_analysis_paragraphs, sort_evidence_payload
 
 
 def test_format_analysis_paragraphs_preserves_inline_math_as_literal_text():
@@ -35,3 +35,19 @@ def test_build_evidence_list_html_renders_labels_pages_and_escaped_text():
     assert "p. 13" in result
     assert "&lt;clearly&gt;" in result
     assert "Tariffs remained a watch-out." in result
+
+
+def test_sort_evidence_payload_orders_brands_alphabetically():
+    result = sort_evidence_payload(
+        [
+            {"brand": "Michelin", "report_year": 2025, "report_summary": "", "evidence": []},
+            {"brand": "Bridgestone", "report_year": 2025, "report_summary": "", "evidence": []},
+            {"brand": "continental", "report_year": 2025, "report_summary": "", "evidence": []},
+        ]
+    )
+
+    assert [item["brand"] for item in result] == [
+        "Bridgestone",
+        "continental",
+        "Michelin",
+    ]

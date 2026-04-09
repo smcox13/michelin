@@ -214,10 +214,24 @@ def build_evidence_list_html(
     return f'<ul class="evidence-list">{"".join(list_items)}</ul>'
 
 
+def sort_evidence_payload(evidence_payload: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        evidence_payload,
+        key=lambda brand_evidence: str(brand_evidence["brand"]).casefold(),
+    )
+
+
 def render_evidence_styles() -> None:
     st.markdown(
         """
         <style>
+        [data-testid="stExpander"] details summary p {
+            margin: 0;
+            font-size: 1.35rem;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+
         .evidence-card {
             border: 1px solid #D7DCE5;
             border-radius: 20px;
@@ -225,11 +239,13 @@ def render_evidence_styles() -> None:
             background: #FFFFFF;
             min-height: 100%;
             box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+            color: #111827;
         }
 
         .evidence-card h4 {
             margin: 0 0 0.2rem;
             font-size: 1.05rem;
+            color: #111827;
         }
 
         .evidence-meta {
@@ -252,6 +268,7 @@ def render_evidence_styles() -> None:
         .evidence-summary p {
             margin: 0;
             line-height: 1.6;
+            color: #111827;
         }
 
         .evidence-list {
@@ -287,7 +304,7 @@ def render_evidence_styles() -> None:
         }
 
         .evidence-item-page {
-            color: #6B7280;
+            color: #111827;
             font-size: 0.82rem;
             font-weight: 600;
             white-space: nowrap;
@@ -296,6 +313,7 @@ def render_evidence_styles() -> None:
         .evidence-item p {
             margin: 0;
             line-height: 1.55;
+            color: #111827;
         }
         </style>
         """,
@@ -307,30 +325,31 @@ def render_report_evidence_section(
     domain: str,
     evidence_payload: list[dict[str, Any]],
 ) -> None:
-    st.subheader("Report-Backed Evidence")
-    st.caption(
-        "Curated annual-report signals used to strengthen the selected-domain "
-        "comparison and AI analysis."
-    )
     render_evidence_styles()
-    labels = EVIDENCE_LABELS[domain]
-    columns = st.columns(min(len(evidence_payload), 4))
+    with st.expander("Report-Backed Evidence", expanded=False):
+        st.caption(
+            "Curated annual-report signals used to strengthen the selected-domain "
+            "comparison and AI analysis."
+        )
+        labels = EVIDENCE_LABELS[domain]
+        ordered_evidence_payload = sort_evidence_payload(evidence_payload)
+        columns = st.columns(min(len(ordered_evidence_payload), 4))
 
-    for index, brand_evidence in enumerate(evidence_payload):
-        with columns[index % len(columns)]:
-            st.markdown(
-                f"""
-                <div class="evidence-card">
-                  <h4>{escape(str(brand_evidence["brand"]))}</h4>
-                  <div class="evidence-meta">Annual report {int(brand_evidence["report_year"])}</div>
-                  <div class="evidence-summary">
-                    {format_analysis_paragraphs(str(brand_evidence["report_summary"]))}
-                  </div>
-                  {build_evidence_list_html(labels, brand_evidence["evidence"])}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+        for index, brand_evidence in enumerate(ordered_evidence_payload):
+            with columns[index % len(columns)]:
+                st.markdown(
+                    f"""
+                    <div class="evidence-card">
+                      <h4>{escape(str(brand_evidence["brand"]))}</h4>
+                      <div class="evidence-meta">Annual report {int(brand_evidence["report_year"])}</div>
+                      <div class="evidence-summary">
+                        {format_analysis_paragraphs(str(brand_evidence["report_summary"]))}
+                      </div>
+                      {build_evidence_list_html(labels, brand_evidence["evidence"])}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
 
 @st.cache_data
