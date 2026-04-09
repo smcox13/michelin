@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import shlex
@@ -14,6 +15,9 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from importlib import import_module
 from typing import Any, Iterator
+
+import httpx
+from dotenv import load_dotenv
 
 from services.mcp_models import (
     BrandNewsContext,
@@ -102,6 +106,8 @@ def _build_server_config(
 def load_mcp_settings(env: dict[str, str] | None = None) -> MCPSettings:
     """Load MCP configuration from environment variables."""
 
+    if env is None:
+        load_dotenv(override=True)
     merged_env = dict(os.environ if env is None else env)
     enabled = _parse_bool(merged_env.get("MCP_ENABLED"), False)
     request_timeout_seconds = _parse_float(
@@ -177,6 +183,14 @@ def _extract_structured_result(result: Any) -> Any:
         return {"text": text}
 
 
+def _summarize_plain_text(payload: dict[str, Any]) -> str:
+    for key in ("summary", "text", "message", "content"):
+        value = payload.get(key)
+        if value:
+            return str(value).strip()
+    return ""
+
+
 @asynccontextmanager
 async def _client_streams(config: MCPServerConfig) -> Iterator[tuple[Any, Any]]:
     mcp_module = import_module("mcp")
@@ -193,19 +207,57 @@ async def _client_streams(config: MCPServerConfig) -> Iterator[tuple[Any, Any]]:
 
     if config.transport == "sse":
         sse_client = getattr(import_module("mcp.client.sse"), "sse_client")
-        async with sse_client(config.url, headers=config.headers or None) as streams:
+        sse_signature = inspect.signature(sse_client)
+        sse_kwargs: dict[str, Any] = {}
+        if "headers" in sse_signature.parameters and config.headers:
+            sse_kwargs["headers"] = config.headers
+        if "timeout" in sse_signature.parameters:
+            sse_kwargs["timeout"] = config.request_timeout_seconds
+        async with sse_client(config.url, **sse_kwargs) as streams:
             yield streams
         return
 
-    streamable_http_client = getattr(
-        import_module("mcp.client.streamable_http"),
-        "streamable_http_client",
+    streamable_http_module = import_module("mcp.client.streamable_http")
+    legacy_streamable_client = getattr(
+        streamable_http_module,
+        "streamablehttp_client",
+        None,
     )
-    async with streamable_http_client(
-        config.url,
-        headers=config.headers or None,
-    ) as streams:
-        yield streams[:2]
+    if legacy_streamable_client is not None:
+        legacy_signature = inspect.signature(legacy_streamable_client)
+        if "headers" in legacy_signature.parameters:
+            async with legacy_streamable_client(
+                config.url,
+                headers=config.headers or None,
+                timeout=config.request_timeout_seconds,
+            ) as streams:
+                yield streams[:2]
+            return
+
+    streamable_http_client = getattr(streamable_http_module, "streamable_http_client")
+    create_mcp_http_client = getattr(streamable_http_module, "create_mcp_http_client", None)
+    timeout = httpx.Timeout(
+        config.request_timeout_seconds,
+        read=max(config.request_timeout_seconds, 300.0),
+    )
+    if create_mcp_http_client is not None:
+        client = create_mcp_http_client(
+            headers=config.headers or None,
+            timeout=timeout,
+        )
+    else:
+        client = httpx.AsyncClient(
+            headers=config.headers or None,
+            timeout=timeout,
+            follow_redirects=True,
+        )
+
+    async with client:
+        async with streamable_http_client(
+            config.url,
+            http_client=client,
+        ) as streams:
+            yield streams[:2]
 
 
 class MCPConnector(ABC):
@@ -323,6 +375,8 @@ class FinanceMCPConnector(MCPConnector):
                 metrics = payload["snapshot"]
             elif isinstance(payload.get("company_facts"), dict):
                 metrics = payload["company_facts"]
+            elif isinstance(payload.get("financials"), dict):
+                metrics = payload["financials"]
 
             normalized_brand = str(payload.get("brand") or metrics.get("brand") or brand)
             market_cap_usd_bn = _coerce_float(
@@ -338,6 +392,8 @@ class FinanceMCPConnector(MCPConnector):
                 operating_margin_pct = operating_margin_pct * 100
 
             summary = str(payload.get("summary") or metrics.get("summary") or "").strip()
+            if not summary:
+                summary = _summarize_plain_text(payload)
             if not summary:
                 finance_parts = []
                 if market_cap_usd_bn is not None:
@@ -383,6 +439,10 @@ class FinanceMCPConnector(MCPConnector):
         tool_name = self.config.tool_name
         if tool_name in {"getFinancialMetricsSnapshot", "getCompanyFacts"}:
             return {"ticker": _brand_symbol(brand)}
+        if tool_name == "secedgar_get_financials":
+            return {"ticker": _brand_symbol(brand)}
+        if tool_name == "secedgar_compare_metric":
+            return {"tickers": [_brand_symbol(brand)], "metric": "Revenues"}
         return super()._build_arguments(brand, domain)
 
 
@@ -394,6 +454,9 @@ class NewsMCPConnector(MCPConnector):
         brands: list[str],
         domain: str,
     ) -> ConnectorFetchResult:
+        if self.config.tool_name in {"get_top_news", "get_tech_news", "get_finance_signals"}:
+            return await self._fetch_shared_context_async(brands, domain)
+
         news_by_brand: dict[str, BrandNewsContext] = {}
         warnings: list[str] = []
         fetched_at: str | None = None
@@ -409,8 +472,7 @@ class NewsMCPConnector(MCPConnector):
             if not isinstance(items, list) and isinstance(payload.get("news"), list):
                 items = payload.get("news", [])
             if not isinstance(items, list):
-                warnings.append(f"{self.provider_name} returned malformed news items for {brand}.")
-                continue
+                items = []
 
             headlines: list[NewsHeadline] = []
             for item in items:
@@ -437,6 +499,16 @@ class NewsMCPConnector(MCPConnector):
             if not themes_raw:
                 themes_raw = [item.get("sentiment") for item in items if isinstance(item, dict)]
             themes = tuple(str(theme).strip() for theme in themes_raw if str(theme).strip())
+            fallback_text = _summarize_plain_text(payload)
+            if fallback_text and not headlines:
+                headlines.append(
+                    NewsHeadline(
+                        headline=f"{brand} live context",
+                        summary=fallback_text,
+                        source=str(payload.get("source") or self.provider_name),
+                        published_at=_normalize_timestamp(payload.get("published_at") or payload.get("date")),
+                    )
+                )
             if not headlines and not themes:
                 warnings.append(f"{self.provider_name} returned no usable news details for {brand}.")
                 continue
@@ -461,9 +533,54 @@ class NewsMCPConnector(MCPConnector):
             warnings=tuple(warnings),
         )
 
+    async def _fetch_shared_context_async(
+        self,
+        brands: list[str],
+        domain: str,
+    ) -> ConnectorFetchResult:
+        raw_result = await self._call_tool(self._build_arguments(brands[0], domain))
+        payload = _extract_structured_result(raw_result)
+        if not isinstance(payload, dict):
+            payload = {"text": str(payload)}
+
+        fallback_text = _summarize_plain_text(payload)
+        if not fallback_text:
+            return ConnectorFetchResult(
+                provider=self.provider_name,
+                warnings=(f"{self.provider_name} returned no usable news details.",),
+            )
+
+        context = BrandNewsContext(
+            brand="Selected Brands",
+            source=str(payload.get("source") or self.provider_name),
+            headlines=(
+                NewsHeadline(
+                    headline="Latest news snapshot",
+                    summary=fallback_text,
+                    source=str(payload.get("source") or self.provider_name),
+                    published_at=_normalize_timestamp(payload.get("published_at") or payload.get("date")),
+                ),
+            ),
+        )
+        return ConnectorFetchResult(
+            provider=self.provider_name,
+            news_by_brand={"Selected Brands": context},
+            fetched_at=_normalize_timestamp(payload.get("published_at") or payload.get("date")) or _iso_now(),
+        )
+
     def _build_arguments(self, brand: str, domain: str) -> dict[str, Any]:
         if self.config.tool_name == "getNews":
             return {"ticker": _brand_symbol(brand), "limit": 5}
+        if self.config.tool_name in {"get_top_news", "get_tech_news", "get_finance_signals"}:
+            return {}
+        if self.config.tool_name == "get_global_events":
+            return {"query": brand}
+        if self.config.tool_name == "nhtsa_search_recalls":
+            return {"query": brand}
+        if self.config.tool_name == "nhtsa_search_complaints":
+            return {"query": brand}
+        if self.config.tool_name == "nhtsa_get_vehicle_safety":
+            return {"query": brand}
         return super()._build_arguments(brand, domain)
 
 

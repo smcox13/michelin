@@ -44,7 +44,7 @@ OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-mini
 ```
 
-4. Optional: configure MCP connectors if you want live finance/news enrichment:
+4. Optional: configure MCP connectors if you want live finance and news enrichment:
 
 ```env
 MCP_ENABLED=true
@@ -52,12 +52,12 @@ MCP_REQUEST_TIMEOUT_SECONDS=8
 MCP_CACHE_TTL_SECONDS=300
 
 FINANCE_MCP_TRANSPORT=streamable-http
-FINANCE_MCP_URL=http://localhost:9001/mcp
-FINANCE_MCP_TOOL=get_brand_finance
+FINANCE_MCP_URL=https://secedgar.caseyjhand.com/mcp
+FINANCE_MCP_TOOL=secedgar_get_financials
 
 NEWS_MCP_TRANSPORT=streamable-http
-NEWS_MCP_URL=http://localhost:9002/mcp
-NEWS_MCP_TOOL=get_brand_news
+NEWS_MCP_URL=https://mrbridge--latest-news-mcp-server.apify.actor/mcp?token=YOUR_APIFY_TOKEN
+NEWS_MCP_TOOL=get_top_news
 ```
 
 You can also use `stdio` transport instead of HTTP by setting `..._TRANSPORT=stdio`, `..._COMMAND`, and `..._ARGS`.
@@ -94,7 +94,7 @@ If MCP is disabled, unconfigured, or unavailable, the comparison experience stay
 TireLens ships with two example connector adapters:
 
 - Finance MCP connector: expects a configured tool that can return structured finance context for a brand.
-- News MCP connector: expects a configured tool that can return recent brand-news summaries or headlines.
+- News MCP connector: expects a configured tool that can return recent text summaries or headlines for the selected brands.
 
 These adapters are intentionally pluggable. TireLens does not hardcode any single public MCP server. Instead, you configure the provider URL or command and the tool name through environment variables.
 
@@ -116,17 +116,7 @@ Example structured payloads the adapters can consume:
 
 ```json
 {
-  "brand": "Michelin",
-  "source": "News MCP",
-  "themes": ["EV demand", "premium pricing"],
-  "items": [
-    {
-      "headline": "Michelin expands EV lineup",
-      "summary": "The brand announced additional EV-focused tire capacity.",
-      "published_at": "2026-04-08T11:00:00Z",
-      "source": "Example News Feed"
-    }
-  ]
+  "text": "Top stories mention tire industry demand, transport regulation, and EV adoption."
 }
 ```
 
@@ -180,10 +170,10 @@ To enable AI insights with Docker Compose, create a `.env` file in the project r
 OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-mini
 MCP_ENABLED=true
-FINANCE_MCP_URL=http://host.docker.internal:9001/mcp
-FINANCE_MCP_TOOL=get_brand_finance
-NEWS_MCP_URL=http://host.docker.internal:9002/mcp
-NEWS_MCP_TOOL=get_brand_news
+FINANCE_MCP_URL=https://secedgar.caseyjhand.com/mcp
+FINANCE_MCP_TOOL=secedgar_get_financials
+NEWS_MCP_URL=https://mrbridge--latest-news-mcp-server.apify.actor/mcp?token=YOUR_APIFY_TOKEN
+NEWS_MCP_TOOL=get_top_news
 ```
 
 Then start the app with:

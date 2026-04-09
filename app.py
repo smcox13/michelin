@@ -24,7 +24,7 @@ from services.mcp_service import get_live_context
 from services.llm_service import generate_brand_analysis
 
 
-load_dotenv()
+load_dotenv(override=True)
 st.set_page_config(page_title="TireLens", layout="wide")
 
 

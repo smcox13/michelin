@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+
 from services.mcp_models import (
     BrandNewsContext,
     ConnectorFetchResult,
@@ -10,6 +14,7 @@ from services.mcp_models import (
     NewsHeadline,
     SourceAttribution,
 )
+from services import mcp_service
 from services.mcp_service import (
     _CACHE,
     BRAND_TICKERS,
@@ -86,6 +91,25 @@ def test_load_mcp_settings_parses_optional_connector_values():
     assert settings.finance.transport == "stdio"
     assert settings.finance.args == ("server.py", "--stdio")
     assert settings.news.headers == {"Authorization": "Bearer token"}
+
+
+def test_load_mcp_settings_loads_dotenv_with_override_when_using_process_env(monkeypatch):
+    called: dict[str, object] = {}
+
+    def fake_load_dotenv(*, override: bool = False):
+        called["override"] = override
+        monkeypatch.setenv("MCP_ENABLED", "true")
+        monkeypatch.setenv("FINANCE_MCP_URL", "https://secedgar.caseyjhand.com/mcp")
+        monkeypatch.setenv("FINANCE_MCP_TOOL", "secedgar_get_financials")
+
+    monkeypatch.setattr(mcp_service, "load_dotenv", fake_load_dotenv)
+
+    settings = load_mcp_settings()
+
+    assert called == {"override": True}
+    assert settings.enabled is True
+    assert settings.finance.url == "https://secedgar.caseyjhand.com/mcp"
+    assert settings.finance.tool_name == "secedgar_get_financials"
 
 
 def test_load_mcp_settings_raises_for_invalid_headers():
@@ -249,3 +273,180 @@ def test_news_connector_maps_known_brand_to_ticker_for_financial_datasets():
         "ticker": BRAND_TICKERS["Bridgestone"],
         "limit": 5,
     }
+
+
+def test_finance_connector_maps_known_brand_to_ticker_for_secedgar():
+    connector = FinanceMCPConnector(
+        MCPServerConfig(
+            name="Finance MCP",
+            enabled=True,
+            transport="streamable-http",
+            tool_name="secedgar_get_financials",
+            request_timeout_seconds=5.0,
+            url="https://secedgar.caseyjhand.com/mcp",
+        )
+    )
+
+    assert connector._build_arguments("Goodyear", "Financials") == {
+        "ticker": BRAND_TICKERS["Goodyear"]
+    }
+
+
+def test_news_connector_uses_query_for_nhtsa_search():
+    connector = NewsMCPConnector(
+        MCPServerConfig(
+            name="News MCP",
+            enabled=True,
+            transport="streamable-http",
+            tool_name="nhtsa_search_recalls",
+            request_timeout_seconds=5.0,
+            url="https://nhtsa.caseyjhand.com/mcp",
+        )
+    )
+
+    assert connector._build_arguments("Michelin", "Products") == {"query": "Michelin"}
+
+
+def test_augment_llm_payload_supports_text_only_secondary_context():
+    live_context = LiveContextBundle(
+        domain="Products",
+        news_by_brand={
+            "Michelin": BrandNewsContext(
+                brand="Michelin",
+                source="NHTSA MCP",
+                headlines=(
+                    NewsHeadline(
+                        headline="Michelin live context",
+                        summary="Recall monitoring context available.",
+                        source="NHTSA MCP",
+                    ),
+                ),
+            )
+        },
+        attribution=SourceAttribution(mode="hybrid", providers=("NHTSA MCP",)),
+        highlights=("Michelin: Recall monitoring context available.",),
+    )
+
+    payload = augment_llm_payload([{"brand": "Michelin"}], live_context)
+
+    assert payload["live_context"]["news_updates"][0]["headlines"][0]["summary"] == (
+        "Recall monitoring context available."
+    )
+
+
+def test_news_connector_uses_empty_args_for_shared_apify_top_news():
+    connector = NewsMCPConnector(
+        MCPServerConfig(
+            name="News MCP",
+            enabled=True,
+            transport="streamable-http",
+            tool_name="get_top_news",
+            request_timeout_seconds=5.0,
+            url="https://mrbridge--latest-news-mcp-server.apify.actor/mcp?token=test",
+        )
+    )
+
+    assert connector._build_arguments("Michelin", "Financials") == {}
+
+
+def test_client_streams_uses_legacy_streamable_http_signature(monkeypatch):
+    captured: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def legacy_streamable_client(url, headers=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        yield ("read", "write", "session-id")
+
+    def fake_import_module(name: str):
+        if name == "mcp":
+            return SimpleNamespace()
+        if name == "mcp.client.streamable_http":
+            return SimpleNamespace(streamablehttp_client=legacy_streamable_client)
+        raise AssertionError(f"Unexpected import: {name}")
+
+    monkeypatch.setattr(mcp_service, "import_module", fake_import_module)
+
+    config = MCPServerConfig(
+        name="News MCP",
+        enabled=True,
+        transport="streamable-http",
+        tool_name="get_top_news",
+        request_timeout_seconds=7.0,
+        url="https://example.com/mcp",
+        headers={"Authorization": "Bearer token"},
+    )
+
+    async def run():
+        async with mcp_service._client_streams(config) as streams:
+            return streams
+
+    streams = asyncio.run(run())
+
+    assert streams == ("read", "write")
+    assert captured == {
+        "url": "https://example.com/mcp",
+        "headers": {"Authorization": "Bearer token"},
+        "timeout": 7.0,
+    }
+
+
+def test_client_streams_builds_http_client_for_modern_streamable_http(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class DummyClient:
+        async def __aenter__(self):
+            captured["client_entered"] = True
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            captured["client_exited"] = True
+            return False
+
+    def create_mcp_http_client(headers=None, timeout=None):
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return DummyClient()
+
+    @asynccontextmanager
+    async def modern_streamable_client(url, *, http_client=None, terminate_on_close=True):
+        captured["url"] = url
+        captured["http_client"] = http_client
+        captured["terminate_on_close"] = terminate_on_close
+        yield ("read", "write", "session-id")
+
+    def fake_import_module(name: str):
+        if name == "mcp":
+            return SimpleNamespace()
+        if name == "mcp.client.streamable_http":
+            return SimpleNamespace(
+                streamable_http_client=modern_streamable_client,
+                create_mcp_http_client=create_mcp_http_client,
+            )
+        raise AssertionError(f"Unexpected import: {name}")
+
+    monkeypatch.setattr(mcp_service, "import_module", fake_import_module)
+
+    config = MCPServerConfig(
+        name="Finance MCP",
+        enabled=True,
+        transport="streamable-http",
+        tool_name="secedgar_get_financials",
+        request_timeout_seconds=9.0,
+        url="https://example.com/mcp",
+        headers={"X-Test": "1"},
+    )
+
+    async def run():
+        async with mcp_service._client_streams(config) as streams:
+            return streams
+
+    streams = asyncio.run(run())
+
+    assert streams == ("read", "write")
+    assert captured["url"] == "https://example.com/mcp"
+    assert captured["headers"] == {"X-Test": "1"}
+    assert captured["http_client"].__class__.__name__ == "DummyClient"
+    assert captured["client_entered"] is True
+    assert captured["client_exited"] is True

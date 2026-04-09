@@ -13,7 +13,7 @@ from services.mcp_models import LiveContextBundle
 from services.mcp_service import augment_llm_payload
 
 
-load_dotenv()
+load_dotenv(override=True)
 
 
 def _fallback_analysis(brands: list[str], domain: str, summary: str) -> BrandAnalysis:
