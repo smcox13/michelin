@@ -33,6 +33,7 @@ st.set_page_config(page_title="TireLens", layout="wide")
 
 
 LOGO_DIR = Path(__file__).parent / "assets" / "logos"
+REPORTS_DIR = Path(__file__).parent / "static" / "reports"
 DATA_DIR = Path(__file__).parent / "data"
 DATASET_FILES = (
     DATA_DIR / "financials.csv",
@@ -221,6 +222,33 @@ def sort_evidence_payload(evidence_payload: list[dict[str, Any]]) -> list[dict[s
     )
 
 
+def build_report_pdf_url(brand: str, report_year: int) -> str | None:
+    normalized_brand = str(brand).strip().casefold().replace(" ", "-")
+    report_filename = f"{normalized_brand}-{int(report_year)}.pdf"
+    report_path = REPORTS_DIR / report_filename
+    if not report_path.exists():
+        return None
+
+    return f"/app/static/reports/{report_filename}"
+
+
+def build_evidence_meta_html(brand: str, report_year: int) -> str:
+    report_label = f"Annual report {int(report_year)}"
+    evidence_meta_html = (
+        f'<div class="evidence-meta">{escape(report_label)}</div>'
+    )
+    report_pdf_url = build_report_pdf_url(brand, report_year)
+    if not report_pdf_url:
+        return evidence_meta_html
+
+    return (
+        f'<a class="evidence-meta-anchor" href="{escape(report_pdf_url, quote=True)}" '
+        'target="_blank" rel="noopener noreferrer">'
+        f'<div class="evidence-meta evidence-meta-link">{escape(report_label)}</div>'
+        "</a>"
+    )
+
+
 def render_evidence_styles() -> None:
     st.markdown(
         """
@@ -259,6 +287,23 @@ def render_evidence_styles() -> None:
             color: #24437A;
             font-size: 0.78rem;
             font-weight: 700;
+        }
+
+        .evidence-meta-anchor {
+            display: inline-flex;
+            text-decoration: none;
+        }
+
+        .evidence-meta-link {
+            cursor: pointer;
+            transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .evidence-meta-anchor:hover .evidence-meta-link,
+        .evidence-meta-anchor:focus-visible .evidence-meta-link {
+            background: #DDE8FF;
+            color: #183867;
+            box-shadow: 0 0 0 2px rgba(36, 67, 122, 0.12);
         }
 
         .evidence-summary {
@@ -341,7 +386,7 @@ def render_report_evidence_section(
                     f"""
                     <div class="evidence-card">
                       <h4>{escape(str(brand_evidence["brand"]))}</h4>
-                      <div class="evidence-meta">Annual report {int(brand_evidence["report_year"])}</div>
+                      {build_evidence_meta_html(str(brand_evidence["brand"]), int(brand_evidence["report_year"]))}
                       <div class="evidence-summary">
                         {format_analysis_paragraphs(str(brand_evidence["report_summary"]))}
                       </div>

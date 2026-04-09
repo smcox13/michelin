@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from app import build_evidence_list_html, format_analysis_paragraphs, sort_evidence_payload
+from app import (
+    build_evidence_list_html,
+    build_evidence_meta_html,
+    build_report_pdf_url,
+    format_analysis_paragraphs,
+    sort_evidence_payload,
+)
 
 
 def test_format_analysis_paragraphs_preserves_inline_math_as_literal_text():
@@ -51,19 +57,22 @@ def test_sort_evidence_payload_orders_brands_alphabetically():
         "continental",
         "Michelin",
     ]
-<<<<<<< ours
-=======
 
 
 def test_build_report_pdf_url_returns_static_path_for_existing_report():
-    assert build_report_pdf_url("Michelin", 2025) == "./app/static/reports/michelin-2025.pdf"
+    assert build_report_pdf_url("Michelin", 2025) == "/app/static/reports/michelin-2025.pdf"
 
 
 def test_build_evidence_meta_html_renders_new_tab_link_for_existing_report():
     result = build_evidence_meta_html("Michelin", 2025)
 
     assert 'class="evidence-meta evidence-meta-link"' in result
-    assert 'href="./app/static/reports/michelin-2025.pdf"' in result
+    assert 'href="/app/static/reports/michelin-2025.pdf"' in result
     assert 'target="_blank"' in result
     assert "Annual report 2025" in result
->>>>>>> theirs
+
+
+def test_build_evidence_meta_html_falls_back_to_plain_badge_for_missing_report():
+    result = build_evidence_meta_html("Michelin", 2024)
+
+    assert result == '<div class="evidence-meta">Annual report 2024</div>'
