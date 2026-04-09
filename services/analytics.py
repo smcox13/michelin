@@ -11,6 +11,16 @@ FINANCIALS = "Financials"
 SUSTAINABILITY = "Sustainability"
 PRODUCTS = "Products"
 DOMAINS = (FINANCIALS, SUSTAINABILITY, PRODUCTS)
+REPORT_EVIDENCE_FIELDS = [
+    "report_year",
+    "report_summary",
+    "evidence_1",
+    "evidence_1_page",
+    "evidence_2",
+    "evidence_2_page",
+    "evidence_3",
+    "evidence_3_page",
+]
 
 
 def calculate_revenue_growth(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -175,6 +185,45 @@ def build_chart_data(domain: str, comparison_table: pd.DataFrame) -> pd.DataFram
     )
 
 
+def build_evidence_payload(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
+    required_columns = ["brand", *REPORT_EVIDENCE_FIELDS]
+    missing_columns = [
+        column for column in required_columns if column not in dataframe.columns
+    ]
+    if missing_columns:
+        missing_list = ", ".join(missing_columns)
+        raise ValueError(
+            "Dataset is missing report evidence columns: "
+            f"{missing_list}. If the app was already running, refresh it so the "
+            "latest CSV data is reloaded."
+        )
+
+    payload: list[dict[str, Any]] = []
+    for record in dataframe.to_dict(orient="records"):
+        payload.append(
+            {
+                "brand": record["brand"],
+                "report_year": int(record["report_year"]),
+                "report_summary": str(record["report_summary"]),
+                "evidence": [
+                    {
+                        "text": str(record["evidence_1"]),
+                        "page": int(record["evidence_1_page"]),
+                    },
+                    {
+                        "text": str(record["evidence_2"]),
+                        "page": int(record["evidence_2_page"]),
+                    },
+                    {
+                        "text": str(record["evidence_3"]),
+                        "page": int(record["evidence_3_page"]),
+                    },
+                ],
+            }
+        )
+    return payload
+
+
 def build_llm_payload(
     domain: str,
     financials: pd.DataFrame,
@@ -193,6 +242,7 @@ def build_llm_payload(
                 "market_cap_usd_bn",
                 "sustainability_score",
                 "composite_score",
+                *REPORT_EVIDENCE_FIELDS,
             ]
         ]
     elif domain == SUSTAINABILITY:
@@ -203,6 +253,7 @@ def build_llm_payload(
                 "sustainability_score",
                 "sustainability_commitment",
                 "circular_economy_initiatives",
+                *REPORT_EVIDENCE_FIELDS,
             ]
         ].copy()
     else:
@@ -213,6 +264,7 @@ def build_llm_payload(
                 "market_position",
                 "ev_tire_presence",
                 "product_portfolio_score",
+                *REPORT_EVIDENCE_FIELDS,
             ]
         ].copy()
 
@@ -230,13 +282,17 @@ def build_domain_comparison(
 
     if domain == FINANCIALS:
         table = build_financial_comparison(financials, sustainability).round(2)
+        evidence = build_evidence_payload(financials)
     elif domain == SUSTAINABILITY:
         table = build_sustainability_comparison(sustainability).round(2)
+        evidence = build_evidence_payload(sustainability)
     else:
         table = build_product_comparison(products).round(2)
+        evidence = build_evidence_payload(products)
 
     return {
         "table": table,
         "chart": build_chart_data(domain, table),
         "llm_payload": build_llm_payload(domain, financials, sustainability, products),
+        "evidence": evidence,
     }

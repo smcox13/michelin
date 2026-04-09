@@ -10,6 +10,17 @@ import pandas as pd
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 
+REPORT_EVIDENCE_COLUMNS = [
+    "report_year",
+    "report_summary",
+    "evidence_1",
+    "evidence_1_page",
+    "evidence_2",
+    "evidence_2_page",
+    "evidence_3",
+    "evidence_3_page",
+]
+
 
 class DataValidationError(ValueError):
     """Raised when a dataset cannot be loaded or validated."""
@@ -25,6 +36,7 @@ DATASET_SCHEMAS = {
             "net_income_usd_bn",
             "operating_margin_pct",
             "market_cap_usd_bn",
+            *REPORT_EVIDENCE_COLUMNS,
         ],
         "numeric_columns": [
             "fiscal_year",
@@ -33,6 +45,10 @@ DATASET_SCHEMAS = {
             "net_income_usd_bn",
             "operating_margin_pct",
             "market_cap_usd_bn",
+            "report_year",
+            "evidence_1_page",
+            "evidence_2_page",
+            "evidence_3_page",
         ],
     },
     "sustainability.csv": {
@@ -42,10 +58,15 @@ DATASET_SCHEMAS = {
             "sustainability_commitment",
             "circular_economy_initiatives",
             "sustainability_score",
+            *REPORT_EVIDENCE_COLUMNS,
         ],
         "numeric_columns": [
             "co2_emissions_scope12_mt",
             "sustainability_score",
+            "report_year",
+            "evidence_1_page",
+            "evidence_2_page",
+            "evidence_3_page",
         ],
     },
     "products.csv": {
@@ -55,10 +76,15 @@ DATASET_SCHEMAS = {
             "market_position",
             "ev_tire_presence",
             "product_portfolio_score",
+            *REPORT_EVIDENCE_COLUMNS,
         ],
         "numeric_columns": [
             "product_categories_count",
             "product_portfolio_score",
+            "report_year",
+            "evidence_1_page",
+            "evidence_2_page",
+            "evidence_3_page",
         ],
     },
 }

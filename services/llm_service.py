@@ -7,7 +7,11 @@ import os
 
 from dotenv import load_dotenv
 
-from chains.brand_analysis_chain import BrandAnalysis, create_brand_analysis_chain
+from chains.brand_analysis_chain import (
+    BrandAnalysis,
+    build_report_guidance,
+    create_brand_analysis_chain,
+)
 
 
 load_dotenv()
@@ -46,6 +50,7 @@ def generate_brand_analysis(
             {
                 "domain": domain,
                 "brands": ", ".join(brands),
+                "report_guidance": build_report_guidance(domain),
                 "metrics_json": json.dumps(metrics_payload, indent=2),
             }
         )

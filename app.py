@@ -11,7 +11,13 @@ import plotly.express as px
 import streamlit as st
 from dotenv import load_dotenv
 
-from services.analytics import DOMAINS, build_domain_comparison
+from services.analytics import (
+    DOMAINS,
+    FINANCIALS,
+    PRODUCTS,
+    SUSTAINABILITY,
+    build_domain_comparison,
+)
 from services.data_loader import (
     DataValidationError,
     filter_by_brands,
@@ -27,6 +33,12 @@ st.set_page_config(page_title="TireLens", layout="wide")
 
 
 LOGO_DIR = Path(__file__).parent / "assets" / "logos"
+DATA_DIR = Path(__file__).parent / "data"
+DATASET_FILES = (
+    DATA_DIR / "financials.csv",
+    DATA_DIR / "sustainability.csv",
+    DATA_DIR / "products.csv",
+)
 SELECTED_TILE_BORDER = "#FF4B4B"
 UNSELECTED_TILE_BORDER = "#D7DCE5"
 
@@ -53,10 +65,35 @@ BRAND_TILE_STYLES = {
     },
 }
 
+EVIDENCE_LABELS = {
+    FINANCIALS: (
+        "Performance Driver",
+        "Capital Allocation / Priority",
+        "Headwind / Risk",
+    ),
+    SUSTAINABILITY: (
+        "Decarbonization Progress",
+        "Circularity / Materials",
+        "Execution Risk / Dependency",
+    ),
+    PRODUCTS: (
+        "Portfolio Breadth / Focus",
+        "EV / OEM / Technology",
+        "Portfolio Risk / Dependency",
+    ),
+}
+
 
 @st.cache_data
-def load_all_datasets():
+def load_all_datasets(_dataset_cache_key: tuple[tuple[str, int, int], ...]):
     return load_financials(), load_sustainability(), load_products()
+
+
+def build_dataset_cache_key() -> tuple[tuple[str, int, int], ...]:
+    return tuple(
+        (path.name, path.stat().st_mtime_ns, path.stat().st_size)
+        for path in DATASET_FILES
+    )
 
 
 def format_analysis_paragraphs(text: str) -> str:
@@ -156,6 +193,144 @@ def render_analysis_card(analysis: dict[str, Any]) -> None:
     render_analysis_list_field("Risk Factors", analysis["risk_factors"])
     render_analysis_text_field("Executive Summary", analysis["summary"])
 
+
+def build_evidence_list_html(
+    labels: tuple[str, str, str],
+    evidence_items: list[dict[str, Any]],
+) -> str:
+    list_items: list[str] = []
+    for label, item in zip(labels, evidence_items):
+        list_items.append(
+            f"""
+            <li class="evidence-item">
+              <div class="evidence-item-header">
+                <span class="evidence-item-label">{escape(label)}</span>
+                <span class="evidence-item-page">p. {int(item["page"])}</span>
+              </div>
+              {format_analysis_paragraphs(str(item["text"]))}
+            </li>
+            """
+        )
+    return f'<ul class="evidence-list">{"".join(list_items)}</ul>'
+
+
+def render_evidence_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        .evidence-card {
+            border: 1px solid #D7DCE5;
+            border-radius: 20px;
+            padding: 1rem 1rem 0.9rem;
+            background: #FFFFFF;
+            min-height: 100%;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+        }
+
+        .evidence-card h4 {
+            margin: 0 0 0.2rem;
+            font-size: 1.05rem;
+        }
+
+        .evidence-meta {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            margin-bottom: 0.75rem;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            background: #EEF3FF;
+            color: #24437A;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
+        .evidence-summary {
+            margin-bottom: 0.9rem;
+        }
+
+        .evidence-summary p {
+            margin: 0;
+            line-height: 1.6;
+        }
+
+        .evidence-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: grid;
+            gap: 0.8rem;
+        }
+
+        .evidence-item {
+            margin: 0;
+            padding-top: 0.8rem;
+            border-top: 1px solid #E5E7EB;
+        }
+
+        .evidence-item:first-child {
+            padding-top: 0;
+            border-top: none;
+        }
+
+        .evidence-item-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.25rem;
+            align-items: baseline;
+        }
+
+        .evidence-item-label {
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .evidence-item-page {
+            color: #6B7280;
+            font-size: 0.82rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .evidence-item p {
+            margin: 0;
+            line-height: 1.55;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_report_evidence_section(
+    domain: str,
+    evidence_payload: list[dict[str, Any]],
+) -> None:
+    st.subheader("Report-Backed Evidence")
+    st.caption(
+        "Curated annual-report signals used to strengthen the selected-domain "
+        "comparison and AI analysis."
+    )
+    render_evidence_styles()
+    labels = EVIDENCE_LABELS[domain]
+    columns = st.columns(min(len(evidence_payload), 4))
+
+    for index, brand_evidence in enumerate(evidence_payload):
+        with columns[index % len(columns)]:
+            st.markdown(
+                f"""
+                <div class="evidence-card">
+                  <h4>{escape(str(brand_evidence["brand"]))}</h4>
+                  <div class="evidence-meta">Annual report {int(brand_evidence["report_year"])}</div>
+                  <div class="evidence-summary">
+                    {format_analysis_paragraphs(str(brand_evidence["report_summary"]))}
+                  </div>
+                  {build_evidence_list_html(labels, brand_evidence["evidence"])}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 @st.cache_data
@@ -328,7 +503,7 @@ def main() -> None:
     )
 
     try:
-        financials, sustainability, products = load_all_datasets()
+        financials, sustainability, products = load_all_datasets(build_dataset_cache_key())
     except DataValidationError as exc:
         st.error(f"Dataset error: {exc}")
         return
@@ -380,10 +555,11 @@ def main() -> None:
         figure.update_layout(legend_title_text="")
         st.plotly_chart(figure, use_container_width=True)
 
+    render_report_evidence_section(selected_domain, comparison["evidence"])
+
     st.divider()
 
     st.markdown("**Step 3: Generate AI Insight for Your Selections**")
-
 
     cache_key = f"analysis::{selected_domain}::{','.join(sorted(selected_brands))}"
     if st.button("Generate AI Insight", type="primary"):
