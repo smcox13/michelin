@@ -51,3 +51,19 @@ def test_sort_evidence_payload_orders_brands_alphabetically():
         "continental",
         "Michelin",
     ]
+<<<<<<< ours
+=======
+
+
+def test_build_report_pdf_url_returns_static_path_for_existing_report():
+    assert build_report_pdf_url("Michelin", 2025) == "./app/static/reports/michelin-2025.pdf"
+
+
+def test_build_evidence_meta_html_renders_new_tab_link_for_existing_report():
+    result = build_evidence_meta_html("Michelin", 2025)
+
+    assert 'class="evidence-meta evidence-meta-link"' in result
+    assert 'href="./app/static/reports/michelin-2025.pdf"' in result
+    assert 'target="_blank"' in result
+    assert "Annual report 2025" in result
+>>>>>>> theirs
