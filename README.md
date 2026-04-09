@@ -1,44 +1,57 @@
 # TireLens
 
-TireLens is a lightweight Streamlit application for comparing four major tire brands across financial, sustainability, and product portfolio dimensions. It pairs curated public-style datasets with explainable analytics and an LLM-powered insight panel that returns structured analysis on demand.
+TireLens is a Streamlit application for comparing Michelin, Goodyear, Continental, and Bridgestone across curated financial, sustainability, and product portfolio datasets. It combines transparent ranking logic, report-backed evidence, and optional AI-generated analysis.
 
-## What The Application Does
+## Current Application Capabilities
 
-- Compares Michelin, Goodyear, Continental, and Bridgestone.
-- Shows a domain-specific comparison table and chart for Financials, Sustainability, or Products.
-- Calculates transparent ranking metrics, including revenue growth and a composite score.
-- Generates structured AI analysis using OpenAI via LangChain.
+- Compare any 2 to 4 supported tire brands in the same session.
+- Switch between `Financials`, `Sustainability`, and `Products` comparison views.
+- View a ranked comparison table and grouped bar chart for the selected domain.
+- Review report-backed evidence cards with annual report summaries, page-level evidence snippets, and links to bundled PDF reports when available.
+- Generate structured AI insight that identifies a leader, explains strengths, highlights risks, and summarizes long-term outlook.
+- Continue using the dashboard without an API key; the AI panel falls back gracefully instead of breaking the app.
 
 ## Architecture Overview
 
-- **Frontend:** Streamlit single-page app in `app.py`
-- **Analytics:** Pure Python helpers in `services/analytics.py`
-- **Data Layer:** Curated CSV datasets loaded by `services/data_loader.py`
-- **LLM Integration:** LangChain prompt and structured response model in `chains/brand_analysis_chain.py` and `services/llm_service.py`
+- **Frontend:** Streamlit app in `app.py`
+- **Analytics:** ranking, normalization, and comparison builders in `services/analytics.py`
+- **Data Layer:** validated CSV loaders in `services/data_loader.py`
+- **LLM Integration:** LangChain + OpenAI structured output in `chains/brand_analysis_chain.py` and `services/llm_service.py`
 
 ## Data Sources
 
-This MVP uses curated CSV datasets stored in `data/` for a deterministic demo. Values are demo-ready approximations based on public company reporting patterns and brand positioning rather than real-time feeds.
+The current application uses curated local assets for a deterministic demo experience. It does not use live financial, ESG, or news APIs.
 
 - `data/financials.csv`
 - `data/sustainability.csv`
 - `data/products.csv`
+- `static/reports/*.pdf`
 
-## Local Setup
+## Installation
 
-1. Create and activate a Python 3.11+ virtual environment.
-2. Install dependencies:
+### Local Install
+
+1. Create and activate a Python `3.11+` virtual environment.
+2. Install the runtime dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Create a `.env` file and add your OpenAI API key if you want AI insights:
+If you also want to run the automated tests locally, install the dev dependencies:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+3. Copy or rename `.env.example` to `.env`, then insert your `OPENAI_API_KEY`.
 
 ```env
 OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-mini
 ```
+
+Only `OPENAI_API_KEY` is needed for the current AI insight feature. `OPENAI_MODEL` is optional.
 
 4. Start the app:
 
@@ -46,97 +59,42 @@ OPENAI_MODEL=gpt-4.1-mini
 streamlit run app.py
 ```
 
-## Environment Variables
+### Alternative Docker and Docker Compose Install
 
-- `OPENAI_API_KEY`: Required to generate AI insights.
-- `OPENAI_MODEL`: Optional. Defaults to `gpt-4.1-mini`.
+Use the same `.env` file if you want AI insights in a container.
 
-If `OPENAI_API_KEY` is not set, the app still works and displays a graceful fallback message in the AI panel.
-
-## Docker
-
-Build the image:
+Docker:
 
 ```bash
 docker build -t tirelens .
-```
-
-Run the container:
-
-```bash
 docker run --rm -p 8501:8501 --env-file .env tirelens
 ```
 
-Run without an API key to validate graceful degradation:
-
-```bash
-docker run --rm -p 8501:8501 tirelens
-```
-
-The application will be available at `http://localhost:8501`.
-
-## Docker Compose
-
-This repo also includes `compose.yaml` for a one-command startup.
-
-Start the app:
+Docker Compose:
 
 ```bash
 docker compose up --build
 ```
 
-Run in the background:
+The app will be available at `http://localhost:8501`.
 
-```bash
-docker compose up --build -d
-```
+### Deployment Notes
 
-Stop it:
-
-```bash
-docker compose down
-```
-
-To enable AI insights with Docker Compose, create a `.env` file in the project root:
-
-```env
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=gpt-4.1-mini
-```
-
-Then start the app with:
-
-```bash
-docker compose up --build
-```
-
-The app will be available at `http://localhost:8501` on that machine. Because Streamlit is configured to listen on `0.0.0.0`, you can also open it from another device on the same network at `http://<computer-ip>:8501` if that computer's firewall allows port `8501`.
-
-## How LLM Is Used
-
-- The user selects brands and a comparison domain.
-- TireLens prepares a structured metrics payload from the visible data.
-- The LLM receives only the selected-domain metrics plus limited qualitative context.
-- LangChain validates the response into a structured schema before the UI renders it.
+- The production image installs runtime dependencies only.
+- The container runs as a non-root user and exposes a built-in health check.
+- If `OPENAI_API_KEY` is omitted, the dashboard still loads and the AI panel falls back gracefully.
 
 ## Tests
 
 Run the automated test suite with:
 
 ```bash
+pip install -r requirements-dev.txt
 pytest
 ```
 
 ## Limitations
 
-- Uses curated datasets instead of live financial or ESG APIs.
-- Excludes real-time news sentiment in the MVP.
-- AI insights are only as strong as the structured inputs provided.
-- The comparison universe is limited to four brands in v1.
-
-## Future Improvements
-
-- Add optional live data connectors with CSV fallback.
-- Expand product taxonomy and regional segmentation.
-- Add news sentiment and timeline views.
-- Support exportable reports and saved comparisons.
+- Uses curated demo datasets instead of live data feeds.
+- AI analysis is limited to the structured metrics and evidence provided to the model.
+- The comparison universe is currently limited to four tire brands.
